@@ -34,7 +34,7 @@ Prolonged exposure to high blood sugar levels damages retinal blood vessels, whi
 
 ```{r}
 # Read the dataset into a dataframe
-data <- read.csv("diabetes.csv", header = T, na.strings = "?")
+data <- read.csv("diabetes_dataset.csv", header = T, na.strings = "?")
 
 # Column names
 colnames(data) <- c("Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome")
