@@ -1,0 +1,502 @@
+---
+title: 'CSC498H Final Project: Real World Problem'
+author: "Loay Halawani (ID: 202001879), Yasmina El Ayache (ID: 202004411), Mohammad Jaber (ID: 202005688)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: readable
+    highlight: espresso
+    number_sections: false
+    toc : yes 
+    toc_depth : 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+---
+
+```{r include=FALSE}
+# Import packages
+library(readxl)
+library(pheatmap)
+library(caTools)
+library(rpart)
+library(randomForest)
+library(pROC)
+library(e1071)
+library(cluster)
+```
+
+# Part 1: Problem Selection
+
+Prolonged exposure to high blood sugar levels damages retinal blood vessels, which leads to diabetic retinopathy, one of the main causes of blindness in individuals with diabetes. The manual inspection process used in traditional screening procedures by ophthalmologists takes a lot of time and resources. By using machine learning models for early detection, screening effectiveness is increased, allowing for prompt intervention to halt the progression of the disease. Benefits include reduced risk of vision impairment, early intervention, affordable screening, enhanced accessibility, efficient use of resources, and scalability to meet the increased prevalence of diabetes worldwide. All things considered, a machine learning approach supports public health objectives by resolving a pressing problem and improving healthcare effectiveness.
+
+# Part 2: Dataset Selection
+
+```{r}
+# Read the dataset into a dataframe
+data <- read.csv("diabetes.csv", header = T, na.strings = "?")
+
+# Column names
+colnames(data) <- c("Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome")
+```
+
+In the above code, we import the dataset and specify its column names.
+
+```{r}
+# Number of observations
+num_observations <- nrow(data)
+cat("Number of Observations:", num_observations)
+```
+
+In the above code, we display the total number of observations in the dataset.
+
+```{r}
+# Number of features
+num_features <- ncol(data)
+cat("\nNumber of Features:", num_features)
+```
+
+In the above code, we display the total number of features in the dataset. Below is an explanation of each feature.
+
+- Pregnancies: To express the number of pregnancies.  
+- Glucose: To express the level of glucose in the blood.  
+- BloodPressure: To express the blood pressure measurement.  
+- SkinThickness: To express the thickness of the skin.  
+- Insulin: To express the level of insulin in the blood.  
+- BMI: To express the value of the Body Mass Index.  
+- DiabetesPedigreeFunction: To express the percentage of diabetes.  
+- Age: To express the age.  
+- Outcome: To express the final result, where 1 is diabetic and 0 is non-diabetic.
+
+# Part 3: Data Exploration
+
+```{r}
+# Summary of the data
+summary(data)
+```
+
+In the above code, we explore the data by displaying a summary that shows the min, max, median (Q2), mean, Q1, and Q3 values of each feature.
+
+```{r}
+# Structure of the data
+str(data)
+```
+
+In the above code, we check the structure of the data that shows the type of each variable (integer, decimal, string etc.).
+
+```{r}
+# First few rows of the dataset
+head(data)
+```
+
+In the above code, we display the first few rows of the dataset.
+
+```{r}
+# Histogram of each feature
+for(col in colnames(data)) {
+  hist(data[[col]], main=col, xlab=col)
+}
+```
+
+In the above code, we plot a histogram for each feature in the dataset. Below is an analysis of each histogram.  
+
+- Pregnancies: Notably, most of the people in these observations had 0 to 3 pregnancies. This trend decreases gradually with the increase in pregnancies.  
+
+- Glucose: Most of the glucose levels are above 75, and it decreases slightly after the level 135. When the level of glucose is less than 75, the number of samples observed is very low, close to zero.  
+
+- BloodPressure: The two tallest bars on the histogram correspond to a blood pressure between 60 and 80 mmHg indicating that this blood pressure is the most prevalent in the sample. Over 80 mmHg and less 60 mmHg the number of samples observed is minimal compared to a blood pressure between 60 and 80 mmHg.  
+
+- SkinThickness:  
+
+- Insulin: Notably, the tallest bar on the histogram corresponds to the 0-100 range of usage, indicating that this insulin level is the most prevalent in the sample. The trend becomes almost close to zero when the level of insulin increases.  
+
+- BMI: In average, most of the sample contains a BMI between 25 and 40. Otherwise, the number of samples observed is minimal.  
+
+- DiabetesPedigreeFunction: Most of the results having the highest frequency is between 0 and 1. Otherwise, the number of samples observed is minimal.  
+
+- Age: Notably, the tallest bar on the histogram corresponds to the 20-30 year age range, indicating that this age group is the most prevalent in the sample.The trend reveals a systematic decline in frequency as age increases, with each successive age bin, from 30 to 80 years, containing fewer individuals than the one before. A sharp drop in frequency is evident after the 20-30 year age range, followed by a more gradual decrease.  
+
+- Outcome: There are 500 observations with outcome equal to 0 (non-diabetic), and around 300 observations with outcome equal to 1 (diabetic). In other words, approx. 62.5% of observations are non-diabetic while approx. 37.5% are diabetic.
+
+
+```{r}
+# Boxplot of each feature
+for (col in colnames(data)) {
+  if (col != "Outcome")
+  boxplot(data[[col]], main=col, ylab="Values", outline=TRUE)
+}
+```
+
+In the above code, we plot a boxplot of each feature in the dataset. As we can see, all the boxplots indicate the presence of outliers in the dataset.
+
+# Part 4: Data Preprocessing
+
+```{r}
+# Missing values in each column
+missing_values <- colSums(is.na(data))
+
+# Columns with missing values
+columns_with_missing <- names(missing_values[missing_values > 0])
+if (length(columns_with_missing) > 0) {
+  cat("Columns with missing values:")
+  cat(columns_with_missing)
+} else {
+  cat("No missing values in the dataset.")
+}
+```
+
+In the above code, we check for the presence of columns with null values and print them if any. Fortunately, there appears to be no missing values in the dataset as shown in the output above.
+
+```{r}
+# Function to remove outliers based on IQR
+remove_outliers <- function(column) {
+  qnt <- quantile(column, probs = c(0.25, 0.75), na.rm = TRUE)
+  iqr <- IQR(column, na.rm = TRUE)
+  lower_bound <- qnt[1] - 1.5 * iqr
+  upper_bound <- qnt[2] + 1.5 * iqr
+  column[which(column < lower_bound | column > upper_bound)] <- NA
+  return(column)
+}
+
+iteration = 0
+while(iteration < 5) {
+  # Applying the function to each column in the dataframe
+  data <- as.data.frame(lapply(data, function(x) remove_outliers(x)))
+
+  # Removing rows with NA values
+  data <- na.omit(data)
+  
+  # Incrementing the number of iterations
+  iteration <- iteration + 1
+}
+```
+
+In the above code, we detect outliers using the Interquartile Range (IQR) method and then remove them from the dataset for five iterations (until there are no outliers present in the dataset anymore).
+
+```{r}
+# Number of observations
+num_observations <- nrow(data)
+cat("Number of Observations:", num_observations)
+```
+
+In the above code, we display the new number of observations after removing outliers from the dataset. As we can see, the number of observations decreased from 768 to 556, indicating that 212 observations (approx. 27.6% of observations) were outliers.
+
+```{r}
+# Boxplot of each feature
+for (col in colnames(data)) {
+  if (col != "Outcome")
+  boxplot(data[[col]], main=col, ylab="Values", outline=TRUE)
+}
+```
+
+In the above code, we plot new boxplots of every feature after removing outliers from the dataset. As we can see, the new boxplots show no sign of outliers anymore, indicating that our previous method in removing outliers was successful.
+
+```{r}
+# Function for min-max normalization
+min_max_normalize <- function(column) {
+  min_val <- min(column, na.rm = TRUE)
+  max_val <- max(column, na.rm = TRUE)
+  normalized_column <- (column - min_val) / (max_val - min_val)
+  normalized_column <- round(normalized_column, 3)
+  return(normalized_column)
+}
+
+# Columns to be normalized
+columns_to_normalize <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin")
+
+# Normalize selected columns
+data[columns_to_normalize] <- lapply(data[columns_to_normalize], min_max_normalize)
+```
+
+In the above code, we apply feature scaling through min-max normalization to variables such as "Glucose", "BloodPressure", "SkinThickness", and "Insulin" so that we can normalize their values to a standard scale of [0.0, 1.0]. The normalized values were then rounded to three decimal places.
+
+```{r}
+# Convert the Pregnancies column to categorical bins
+data$Pregnancies <- cut(data$Pregnancies, breaks = c(-Inf, 0, 2, 5, 9, Inf), labels = c("_None", "_Low", "_Moderate", "_High", "_Vhigh"), include.lowest = T)
+
+# Perform one-hot encoding
+one_hot_encoded <- model.matrix(~ Pregnancies - 1, data = data)
+
+# Combine the one-hot encoded matrix with the original data
+data <- cbind(data, one_hot_encoded)
+
+# Drop the original Pregnancies column
+data <- data[, !(names(data) %in% "Pregnancies")]
+```
+
+In the above code, we normalize the Pregnancies feature based on the Binning/Discretization method. Five bins of pregnancy ranges were created where Bin 1 contains 0 pregnancies (None), Bin 2 contains 1-2 pregnancies (Low), Bin 3 contains 3-5 pregnancies (Moderate), Bin 4 contains 6-9 pregnancies (High), and Bin 5 contains 10+ pregnancies (Vhigh). The categorical bins were then one-hot encoded to fit the models.
+
+```{r}
+# Convert the BMI column to categorical bins
+data$BMI <- cut(data$BMI, breaks = c(-Inf, 18.4, 24.5, 29.9, 34.9, 39.9, Inf), labels = c("_Underweight", "_Normal", "_Overweight", "_Obese_Class1", "_Obese_Class2", "_Obese_Class3"), include.lowest = T)
+
+# Perform one-hot encoding
+one_hot_encoded <- model.matrix(~ BMI - 1, data = data)
+
+# Combine the one-hot encoded matrix with the original data
+data <- cbind(data, one_hot_encoded)
+
+# Drop the original BMI column
+data <- data[, !(names(data) %in% "BMI")]
+```
+
+In the above code, we normalize the BMI feature based on the Binning/Discretization method. Six bins of BMI ranges were created where Bin 1 contains values of BMI <= 18.4 (Underweight), Bin 2 contains values of 18.5 <= BMI <= 24.5 (Normal), Bin 3 contains values of 25.0 <= BMI <= 29.9 (Overweight), Bin 4 contains values of 30.0 <= BMI <= 34.9 (Obese Class 1), Bin 5 contains values of 35.0 <= BMI <= 39.9 (Obese Class 2), and Bin 6 contains of BMI >= 40.0 (Obese Class 3). The categorical bins were then one-hot encoded to fit the models.
+
+```{r}
+# Convert the Age column to categorical bins
+data$Age <- cut(data$Age, breaks = c(20, 29, 39, 49, Inf), labels = c("_20_29", "_30_39", "_40_49", "_50"), include.lowest = TRUE)
+
+# Perform one-hot encoding
+one_hot_encoded <- model.matrix(~ Age - 1, data = data)
+
+# Combine the one-hot encoded matrix with the original data
+data <- cbind(data, one_hot_encoded)
+
+# Drop the original BMI column
+data <- data[, !(names(data) %in% "Age")]
+```
+
+In the above code, we normalize the Age feature based on the Binning/Discretization method. Four bins of age ranges were created where Bin 1 contains 20-29 years of age, Bin 2 contains 30-39 years of age, Bin 3 contains 40-49 years of age, and Bin 4 contains 50+ years of age. The categorical bins were then one-hot encoded to fit the models.
+
+```{r}
+# Correlation matrix
+correlation_matrix <- cor(data)
+```
+
+In the above code, we compute the correlation matrix for in depth analysis of the correlation between the different variables with respect to the target variable Outcome.
+
+```{r}
+# Subset correlation heatmap
+selected_vars <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "DiabetesPedigreeFunction", "Outcome")
+subset_matrix <- correlation_matrix[selected_vars, selected_vars]
+pheatmap(subset_matrix,
+         color = colorRampPalette(c("blue", "white", "red"))(10),
+         main = "Subset Correlation Heatmap"
+)
+```
+
+The above heatmap is focused on medical/biological variables such as Diabetes Pedigree Function, Skin Thickness, Insulin, Blood Pressure, Glucose, and an outcome. The Diabetes Pedigree Function seems to have a moderate positive correlation with the outcome. Glucose has the strongest positive correlation with the outcome, suggesting it's an important factor in whatever the outcome represents. Insulin and Skin Thickness show a neutral to slightly negative correlation with the outcome.
+
+```{r}
+# Subset correlation heatmap
+selected_vars <- c("Pregnancies_None", "Pregnancies_Low", "Pregnancies_Moderate", "Pregnancies_High", "Pregnancies_Vhigh", "Outcome")
+subset_matrix <- correlation_matrix[selected_vars, selected_vars]
+pheatmap(subset_matrix, 
+         color = colorRampPalette(c("blue", "white", "red"))(10),
+         main = "Subset Correlation Heatmap"
+)
+```
+
+The above heatmap represents correlations between different categories of pregnancies (none, low, moderate, high, very high) and an outcome. There is a gradient of correlation from pregnancies with 'none' having a slight negative correlation to 'very high', which has a slight positive correlation with the outcome. This might suggest that the frequency of pregnancies has an impact on the outcome being measured.
+
+```{r}
+# Subset correlation heatmap
+selected_vars <- c("BMI_Underweight", "BMI_Normal", "BMI_Overweight", "BMI_Obese_Class1", "BMI_Obese_Class2", "BMI_Obese_Class3", "Outcome")
+subset_matrix <- correlation_matrix[selected_vars, selected_vars]
+pheatmap(subset_matrix, 
+         color = colorRampPalette(c("blue", "white", "red"))(10),
+         main = "Subset Correlation Heatmap"
+)
+```
+
+The variables in the above heatmap are different BMI (Body Mass Index) categories ranging from underweight to obese class 3, correlated with an outcome. BMI categories related to obesity (Obese Class 1, 2, and 3) have a positive correlation with the outcome, with the strongest being Obese Class 1. Normal BMI has a slight negative correlation, and underweight has a neutral to slightly positive correlation with the outcome. This indicates that higher BMI categories, especially those in the obese range, have a stronger positive relationship with the outcome.
+
+```{r}
+# Subset correlation heatmap
+selected_vars <- c("Age_20_29", "Age_30_39", "Age_40_49", "Age_50", "Outcome")
+subset_matrix <- correlation_matrix[selected_vars, selected_vars]
+pheatmap(subset_matrix, 
+         color = colorRampPalette(c("blue", "white", "red"))(10),
+         main = "Subset Correlation Heatmap"
+)
+```
+
+The above heatmap shows the correlation between different age groups and an outcome variable. The color scale ranges from -1 (strong negative correlation, shown in red) to +1 (strong positive correlation, shown in blue). Most age groups appear to have a neutral to slightly positive correlation with the outcome, except for the Age (20-49) group which has a strong negative correlation.
+
+# Part 5: Data Splitting
+
+```{r}
+# Set a random seed
+set.seed(123)
+
+# Split the dataset
+split <- sample.split(data$Outcome, SplitRatio = 0.6)
+
+# Train set
+train <- subset(data, split == T)
+
+# Test set
+test <- subset(data, split == F)
+```
+
+In the above code, we split the dataset using the validation set approach into two sets, a training set (60%), and test set (40%), where a random seed is specified to ensure reproducibility if the code is executed multiple times.
+
+# Part 6: Model Development
+
+```{r}
+# Train the unpruned decision tree
+unpruned_tree <- rpart(Outcome ~ ., data = train, method = "class")
+
+# Unpruned tree
+printcp(unpruned_tree)
+```
+
+In the above code, we train an unpruned decision tree model and print its contents.
+
+```{r}
+# Optimal complexity parameter for pruning
+cp_value <- unpruned_tree$cptable[which.min(unpruned_tree$cptable[, "xerror"]), "CP"]
+
+# Prune the tree using the complexity parameter
+pruned_tree <- prune(unpruned_tree, cp = cp_value)
+
+# Pruned tree
+printcp(pruned_tree)
+```
+
+In the above code, we prune the decision tree according to the computed optimal complexity parameter, and then print its contents.
+
+```{r}
+# Make predictions on the test set using the pruned tree
+predictions <- predict(pruned_tree, newdata = test, type = "class")
+
+# Convert predicted values to a factor for evaluation
+predicted_classes <- as.factor(predictions)
+```
+
+In the above code, we make predictions on the test set using the pruned tree model.
+
+```{r}
+# Compute confusion matrix
+confusion_matrix <- table(test$Outcome, predicted_classes)
+print(confusion_matrix)
+
+# Calculate accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+accuracy <- round(accuracy, 2)
+cat("Accuracy:", accuracy)
+
+# Calculate precision
+precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+precision <- round(precision, 2)
+cat("\nPrecision:", precision)
+
+# Calculate recall
+recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+recall <- round(recall, 2)
+cat("\nRecall:", recall)
+
+# Calculate F1 score
+f1_score <- 2 * (precision * recall) / (precision + recall)
+f1_score <- round(f1_score, 2)
+cat("\nF1 Score:", f1_score)
+```
+
+In the above codes, we evaluate the performance of this model by computing its confusion matrix, accuracy, precision, recall, and f1 score values.
+
+```{r warning=FALSE}
+# Train the Random Forest model
+model <- randomForest(Outcome ~ ., data = train)
+
+# Make predictions on the test set
+predictions <- predict(model, newdata = test)
+```
+
+In the above code, we train and test a Random Forest model on the dataset.
+
+```{r message=FALSE}
+# Calculate and plot ROC curve
+roc_curve <- roc(test$Outcome, as.numeric(predictions))
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Calculate AUC value
+auc_value <- auc(roc_curve)
+cat("AUC:", round(auc_value, 2))
+```
+
+In the above codes, we evaluate the model's performance by plotting its ROC curve and calculating its AUC value. Evaluation metrics such as confusion matrix, accuracy, precision, recall, and f1 score were not calculated since such metrics are very sensitive to class imbalance which is the case in our test set.
+
+```{r warning=FALSE}
+# Train the SVM model
+model <- svm(Outcome ~ ., data = train, kernel = "poly", degree = 2, cost = 1, gamma = 1)
+
+# Make predictions on the test set
+predictions <- predict(model, newdata = test)
+```
+
+In the above code, we train and test an SVM model on the dataset.
+
+```{r message=FALSE}
+# Calculate and plot ROC curve
+roc_curve <- roc(test$Outcome, as.numeric(predictions))
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Calculate AUC value
+auc_value <- auc(roc_curve)
+cat("AUC:", round(auc_value, 2))
+```
+
+In the above codes, we use evaluation metrics such as plotting the model's ROC curve and calculating its AUC value (for the same reason mentioned previously).
+
+```{r}
+# Set a random seed
+set.seed(123)
+
+# Select features for clustering
+features <- data[, c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "DiabetesPedigreeFunction", "Pregnancies_None", "Pregnancies_Low", "Pregnancies_Moderate", "Pregnancies_High", "Pregnancies_Vhigh", "BMI_Underweight", "BMI_Normal", "BMI_Overweight", "BMI_Obese_Class1", "BMI_Obese_Class2", "BMI_Obese_Class3", "Age_20_29", "Age_30_39", "Age_40_49", "Age_50")]
+
+# Specify number of clusters (k)
+k <- 2
+
+# Train the k-means model
+model <- kmeans(features, centers = k)
+
+# Predict cluster assignments for the entire dataset
+cluster_assignments <- model$cluster
+```
+
+In the above code, we apply a k-means clustering model on the dataset with k = 2 (number of clusters).
+
+```{r}
+# Calculate inertia
+inertia <- model$tot.withinss
+print(paste("Inertia:", inertia))
+
+# Calculate silhouette score
+silhouette_score <- silhouette(cluster_assignments, dist(features))
+print(paste("Silhouette Score:", mean(silhouette_score[, 3])))
+```
+
+In the above codes, to evaluate the performance of the k-means, the inertia (how far the points within a cluster are from the centroid of that cluster) and silhouette score (how similar an object is to its own cluster compared to other clusters) were calculated. Generally, a lower inertia value indicate tighter clusters, and a higher silhouette score indicate well-seperated clusters.
+
+# Part 7: Hyperparameter Tuning
+
+```{r warning=FALSE, message=FALSE}
+# Train the SVM model
+model <- svm(Outcome ~ ., data = train, kernel = "poly", degree = 3, cost = 0.1, gamma = 0.05)
+
+# Make predictions on the test set
+predictions <- predict(model, newdata = test)
+
+# Calculate and plot ROC curve
+roc_curve <- roc(test$Outcome, as.numeric(predictions))
+plot(roc_curve, main = "ROC Curve", col = "blue", lwd = 2)
+
+# Calculate AUC value
+auc_value <- auc(roc_curve)
+cat("AUC:", round(auc_value, 2))
+```
+
+In the above codes, we tune the hyperparamaters of SVM (kernel, degree, cost, and gamma) to improve its performance. The best parameter values we observed that gave us the best AUC value (0.77 from 0.69) were a polynomial kernel, a cubic degree, a cost of 0.1, and a gamma value of 1/n where n is the number of features (1/n = 0.05 in our case).
+
+# Part 8: Results Interpretation
+
+- Pruned Decision Tree: Analyzing the table of the unpruned decision tree, we can see that as the complexity parameter (CP) increases, the cross-validated error initially decreases, but after a certain point, it starts to increase. This is an indication of overfitting. The model is becoming too complex and starts to perform poorly on unseen data. The initial root node error is 0.26727, indicating that about 26.73% of instances are misclassified at the root. After pruning, only two variables are used in the tree construction: DiabetesPedigreeFunction and Glucose. The root node error remains the same as before pruning, which is 0.26727. This is expected since pruning doesn't change the initial error at the root. The cross-validated error after pruning is 0.93258, which is lower than the unpruned tree's cross-validated error of 1.00000. This suggests that the pruned tree may generalize better to new data. The model's accuracy is reasonably high at 74%. A precision of 0.51 suggests that there is room for improvement in correctly identifying true positives among the predicted positives. A recall of 0.33 indicates that the model is capturing only a third of the actual positive instances.
+
+- Random Forest: The AUC value is calculated as 0.77, which suggests that the model has a moderate level of discrimination ability. The model, as evaluated by the ROC curve and AUC value, demonstrates a reasonable ability to discriminate between the two classes (diabetic and non-diabetic) in the test set.
+
+- Support Vector Machines (SVM): The AUC value is calculated as 0.77, which suggests that the model has a moderate level of discrimination ability. The model, as evaluated by the ROC curve and AUC value, demonstrates a reasonable ability to discriminate between the two classes (diabetic and non-diabetic) in the test set.
+
+- k-Means Clustering: The inertia value of 1122.39 gives an indication of the compactness of the clusters. Lower inertia values generally indicate tighter, more compact clusters. The silhouette score of approximately 0.15 suggests that the separation between clusters is not very well-defined. A silhouette score close to 0 indicates overlapping clusters.
+
+In conclusion, both Random Forest and SVM stand out as the best models here. An SVM model can be considered over a Random Forest model here due to the fact that Random Forests are often considered as "black-box" models, meaning they provide accurate predictions but may lack interpretability. On the other hand, SVMs can offer more interpretability in terms of understanding the influence of each feature on the classification.
